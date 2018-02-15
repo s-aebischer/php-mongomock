@@ -14,6 +14,26 @@ class MockCursor implements Iterator
         $this->store = $documents;
     }
 
+    public function getId()
+    {
+        return new stdClass();
+    }
+
+    public function getServer()
+    {
+        return new stdClass();
+    }
+
+    public function isDead()
+    {
+        return false;
+    }
+
+    public function setTypeMap(array $typeMap)
+    {
+
+    }
+
     public function toArray()
     {
         return $this->store;
