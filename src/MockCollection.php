@@ -13,6 +13,8 @@ use MongoDB\Collection;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 use MongoDB\Model\IndexInfoIteratorIterator;
+use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
+use PHPUnit\Framework\Constraint\Constraint;
 
 /**
  * A mocked MongoDB collection
@@ -98,6 +100,14 @@ class MockCollection extends Collection
     {
         if (!isset($document['_id'])) {
             $document['_id'] = new ObjectID();
+        } else {
+            // make sure document with the same id does not exist
+            foreach ($this->documents as $doc) {
+                // if document with the same id already exists
+                if ($doc['_id'] == $document['_id']) {
+                    throw new DriverRuntimeException();
+                }
+            }
         }
 
         if (!$document instanceof BSONDocument) {
@@ -340,7 +350,98 @@ class MockCollection extends Collection
 
     public function aggregate(array $pipeline, array $options = [])
     {
-        // TODO: Implement this function
+        if (isset($options['typeMap'])) {
+            $typeMap = array_merge($this->typeMap, $options['typeMap']);
+        } else {
+            $typeMap = $this->typeMap;
+        }
+
+        $result = array_values($this->documents);
+        foreach($pipeline as $operation => $pipe) {
+            if(!is_array($pipe)) {
+                throw new Exception('aggregation pipe must be an array');
+            } elseif(count($pipe) !== 1) {
+                throw new Exception('aggregation pipe only supports one operation');
+            }
+
+            reset($pipe);
+            $operation = key($pipe);
+            $pipe = $pipe[$operation];
+
+            switch($operation) {
+                case '$match':
+                    $result = $this->aggregateMatch($result, $pipe);
+                break;
+                case '$lookup':
+                    $result = $this->aggregateLookup($result, $pipe);
+                break;
+                case '$addFields':
+                    $result = $this->aggregateAddFields($result, $pipe);
+                break;
+                default:
+                    throw new Exception('aggregation '.$operation.' is not supported');
+            }
+        }
+
+        $cursor = [];
+        foreach($result as $doc) {
+            $cursor[] = $this->typeMap($doc, $typeMap);
+        }
+
+        return new MockCursor($cursor);
+    }
+
+    protected function aggregateMatch($documents, $pipe)
+    {
+        $matcher = $this->matcherFromQuery($pipe);
+        $result = [];
+        foreach ($documents as $doc) {
+            if ($matcher($doc)) {
+                $result[] = $doc;
+            }
+        }
+
+        return $result;
+    }
+
+    protected function aggregateLookup($documents, $pipe)
+    {
+        if(!isset($pipe['from'])) {
+            throw new Exception('$lookup requires from');
+        }
+
+        if(!isset($pipe['localField'])) {
+            throw new Exception('$lookup requires localField');
+        }
+
+        if(!isset($pipe['foreignField'])) {
+            throw new Exception('$lookup requires foreignField');
+        }
+
+        if(!isset($pipe['as'])) {
+            throw new Exception('$lookup requires as');
+        }
+
+        $remote = $this->db->selectCollection($pipe['from']);
+
+        foreach($documents as &$doc) {
+            if(!isset($doc[$pipe['localField']])) {
+                $doc[$pipe['as']] = [];
+                continue;
+            }
+
+            $doc[$pipe['as']] = $remote->find(
+                [$pipe['foreignField'] => $doc[$pipe['localField']]]
+            )->toArray();
+        }
+
+
+        return $documents;
+    }
+
+    protected function aggregateAddFields($documents, $pipe)
+    {
+        return $documents;
     }
 
     public function bulkWrite(array $operations, array $options = [])
@@ -536,7 +637,7 @@ class MockCollection extends Collection
             return $constraint;
         }
 
-        if ($constraint instanceof \PHPUnit_Framework_Constraint) {
+        if ($constraint instanceof Constraint) {
             return function ($val) use ($constraint): bool {
                 return $constraint->evaluate($val, '', true);
             };
