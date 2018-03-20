@@ -126,6 +126,19 @@ class MockDatabase extends Database
     }
 
     /**
+     * Return empty cursor
+     *
+     * @param array|object $command Command document
+     * @param array        $options Options for command execution
+     * @return MockCursor
+     */
+    public function command($command, array $options = [])
+    {
+        return new MockCursor([]);
+    }
+
+
+    /**
      * Return collection
      *
      * @param  string $name
