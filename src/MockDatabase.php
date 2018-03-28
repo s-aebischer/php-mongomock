@@ -112,7 +112,7 @@ class MockDatabase extends Database
     public function createCollection($name, array $options = [])
     {
         if (isset($this->collections[$name])) {
-            throw new RuntimeException('collection already exists');
+            throw new RuntimeException('collection already exists', 48);
         }
 
         $this->collections[$name] = [
