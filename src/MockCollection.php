@@ -198,7 +198,7 @@ class MockCollection extends Collection
     {
         // The update operators are required, as exemplified here:
         // http://mongodb.github.io/mongo-php-library/tutorial/crud/
-        $supported = ['$set', '$unset'];
+        $supported = ['$set', '$unset', '$inc'];
         $unsupported = array_diff(array_keys($update), $supported);
         if (count($unsupported) > 0) {
             throw new Exception("Unsupported update operators found: " . implode(', ', $unsupported));
@@ -206,6 +206,14 @@ class MockCollection extends Collection
 
         foreach ($update['$set'] ?? [] as $k => $v) {
             $doc[$k] = $v;
+        }
+
+        foreach ($update['$inc'] ?? [] as $k => $v) {
+            if (array_key_exists($k, $doc)) {
+                $doc[$k] += $v;
+            } else {
+                $doc[$k] = $v;
+            }
         }
 
         foreach ($update['$unset'] ?? [] as $k => $v) {
