@@ -198,7 +198,7 @@ class MockCollection extends Collection
     {
         // The update operators are required, as exemplified here:
         // http://mongodb.github.io/mongo-php-library/tutorial/crud/
-        $supported = ['$set', '$unset', '$inc'];
+        $supported = ['$set', '$unset', '$addToSet', '$inc'];
         $unsupported = array_diff(array_keys($update), $supported);
         if (count($unsupported) > 0) {
             throw new Exception("Unsupported update operators found: " . implode(', ', $unsupported));
@@ -206,6 +206,14 @@ class MockCollection extends Collection
 
         foreach ($update['$set'] ?? [] as $k => $v) {
             $doc[$k] = $v;
+        }
+
+        foreach ($update['$addToSet'] ?? [] as $k => $v) {
+            if (array_key_exists($k, $doc)) {
+                $doc[$k][] = $v;
+            } else {
+                $doc[$k] = [$v];
+            }
         }
 
         foreach ($update['$inc'] ?? [] as $k => $v) {
@@ -383,6 +391,15 @@ class MockCollection extends Collection
                 case '$lookup':
                     $result = $this->aggregateLookup($result, $pipe);
                 break;
+                case '$unwind':
+                    $result = $this->aggregateUnwind($result, $pipe);
+                break;
+                case '$replaceRoot':
+                    $result = $this->aggregateReplaceRoot($result, $pipe);
+                break;
+                case '$project':
+                    $result = $this->aggregateProject($result, $pipe);
+                break;
                 case '$addFields':
                     $result = $this->aggregateAddFields($result, $pipe);
                 break;
@@ -397,6 +414,62 @@ class MockCollection extends Collection
         }
 
         return new MockCursor($cursor);
+    }
+
+    protected function aggregateUnwind($documents, $pipe)
+    {
+        if(!isset($pipe['path'])) {
+            throw new Exception('$unwind requires path');
+        }
+
+        $field = $pipe['path'];
+
+        if(substr($field, 0, 1) !== '$') {
+            throw new Exception('$unwind path requires field with $ prefix');
+        }
+
+        $field = substr($field, 1);
+
+        $result = [];
+        foreach($documents as $doc) {
+            $value = $this->getArrayValue($doc, $field);
+            if($value !== null) {
+                foreach($value as $sub) {
+                    $sub_doc = $doc->getArrayCopy();
+                    $sub_doc[$field] = $sub;
+                    $result[] = new BSONDocument($sub_doc);
+                }
+            } else {
+                $result[] = $doc;
+            }
+        }
+
+        return $result;
+    }
+
+    protected function aggregateProject($documents, $pipe)
+    {
+        return $documents;
+    }
+
+    protected function aggregateReplaceRoot($documents, $pipe)
+    {
+        if(!isset($pipe['newRoot'])) {
+            throw new Exception('$newRoot requires newRoot');
+        }
+
+        $field = $pipe['newRoot'];
+        if(substr($field, 0, 1) !== '$') {
+            throw new Exception('$newRoot newRoot requires field with $ prefix');
+        }
+
+        $field = substr($field, 1);
+        foreach($documents as &$doc) {
+            $sub = $this->getArrayValue($doc, $field);
+            $doc = new BSONDocument($sub);
+        }
+
+        return $documents;
     }
 
     protected function aggregateMatch($documents, $pipe)
