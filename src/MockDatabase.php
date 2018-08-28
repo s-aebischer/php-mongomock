@@ -6,7 +6,7 @@ use ArrayIterator;
 use MongoDB\Collection;
 use MongoDB\Database;
 use MongoDB\Driver\Exception\RuntimeException;
-use MongoDB\Model\CollectionInfoLegacyIterator;
+use MongoDB\Model\CollectionInfoCommandIterator;
 
 /**
  * A mocked MongoDB database
@@ -67,7 +67,7 @@ class MockDatabase extends Database
             ];
         }
 
-        return new CollectionInfoLegacyIterator(new ArrayIterator($collections));
+        return new CollectionInfoCommandIterator(new ArrayIterator($collections));
     }
 
 
