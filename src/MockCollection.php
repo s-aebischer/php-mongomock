@@ -13,7 +13,7 @@ use MongoDB\Collection;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 use MongoDB\Model\IndexInfoIteratorIterator;
-use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
+use MongoDB\Driver\Exception\BulkWriteException;
 use PHPUnit\Framework\Constraint\Constraint;
 
 /**
@@ -105,7 +105,7 @@ class MockCollection extends Collection
             foreach ($this->documents as $doc) {
                 // if document with the same id already exists
                 if ($doc['_id'] == $document['_id']) {
-                    throw new DriverRuntimeException();
+                    throw new BulkWriteException('duplicate key error', 11000);
                 }
             }
         }
@@ -186,10 +186,12 @@ class MockCollection extends Collection
             if ($options['upsert'] && !$anyUpdates) {
                 if (array_key_exists('$set', $update)) {
                     $documents = [array_merge($filter, $update['$set'])];
+                } elseif (array_key_exists('$setOnInsert', $update)) {
+                    $documents = [$update['$setOnInsert']];
                 } else {
                     $documents = [$update];
                 }
-                $this->insertMany($documents, $options);
+                return $this->insertMany($documents, $options);
             }
         }
     }
@@ -198,7 +200,7 @@ class MockCollection extends Collection
     {
         // The update operators are required, as exemplified here:
         // http://mongodb.github.io/mongo-php-library/tutorial/crud/
-        $supported = ['$set', '$unset', '$addToSet', '$inc'];
+        $supported = ['$set', '$unset', '$addToSet', '$inc', '$setOnInsert'];
         $unsupported = array_diff(array_keys($update), $supported);
         if (count($unsupported) > 0) {
             throw new Exception("Unsupported update operators found: " . implode(', ', $unsupported));
