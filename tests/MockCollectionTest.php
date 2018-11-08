@@ -704,6 +704,24 @@ class MockCollectionTest extends \PHPUnit_Framework_TestCase
     /**
      * @depends testInsertManyInsertsDocuments
      */
+    public function testManyByCombinedAndOrQuery()
+    {
+        $this->col->insertMany([
+            ['foo' => 'foo', 'bar' => 3],
+            ['foo' => 'bar', 'bar' => 1],
+            ['foo' => 'baz', 'bar' => 2],
+        ]);
+
+        $result = $this->col->find(['$or' => [['foo' => 'foo'], ['foo' => 'baz']], 'bar' => 3]);
+        assertThat($result, isInstanceOf(MockCursor::class));
+        $result = $result->toArray();
+        assertThat(count($result), equalTo(1));
+        assertThat($result[0]['foo'], equalTo('foo'));
+    }
+
+    /**
+     * @depends testInsertManyInsertsDocuments
+     */
     public function testManyByOrAndQuery()
     {
         $this->col->insertMany([

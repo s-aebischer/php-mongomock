@@ -643,7 +643,7 @@ class MockCollection extends Collection
         return $matchers;
     }
 
-    private function matcherFromQuery(array $query): callable
+    private function matcherFromQuery(?array $query): callable
     {
         $matchers = $this->buildRecursiveMatcherQuery($query);
         $orig_matchers = $matchers;
