@@ -633,7 +633,7 @@ class MockCollection extends Collection
     private function buildRecursiveMatcherQuery(?array $query): array
     {
         $matchers = [];
-        foreach ($query as $field => $value) {
+        foreach ((array)$query as $field => $value) {
             if ($field === '$and' || $field === '$or' || is_numeric($field)) {
                 $matchers[$field] = $this->buildRecursiveMatcherQuery($value);
             } else {
