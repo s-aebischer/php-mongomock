@@ -630,7 +630,7 @@ class MockCollection extends Collection
         // TODO: Implement this function
     }
 
-    private function buildRecursiveMatcherQuery(array $query): array
+    private function buildRecursiveMatcherQuery(?array $query): array
     {
         $matchers = [];
         foreach ($query as $field => $value) {
