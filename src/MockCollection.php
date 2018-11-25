@@ -252,6 +252,14 @@ class MockCollection extends Collection
         if (isset($options['sort'])) {
             usort($collectionCopy, function ($a, $b) use ($options): int {
                 foreach ($options['sort'] as $key => $dir) {
+                    if($key === '$natural') {
+                        if($dir === 0) {
+                            return -1;
+                        }
+
+                        continue;
+                    }
+
                     $av = $a[$key];
                     $bv = $b[$key];
 
