@@ -366,6 +366,7 @@ class MockCollection extends Collection
         }
 
         $this->indices[$name] = new Index($key, $options);
+        return $name;
     }
 
     public function drop(array $options = [])
