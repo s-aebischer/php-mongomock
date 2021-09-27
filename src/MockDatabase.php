@@ -6,7 +6,7 @@ use ArrayIterator;
 use MongoDB\Collection;
 use MongoDB\Database;
 use MongoDB\Driver\Exception\RuntimeException;
-use MongoDB\Model\CollectionInfoLegacyIterator;
+use MongoDB\Model\CollectionInfoCommandIterator;
 
 /**
  * A mocked MongoDB database
@@ -67,7 +67,7 @@ class MockDatabase extends Database
             ];
         }
 
-        return new CollectionInfoLegacyIterator(new ArrayIterator($collections));
+        return new CollectionInfoCommandIterator(new ArrayIterator($collections));
     }
 
 
@@ -112,7 +112,7 @@ class MockDatabase extends Database
     public function createCollection($name, array $options = [])
     {
         if (isset($this->collections[$name])) {
-            throw new RuntimeException('collection already exists');
+            throw new RuntimeException('collection already exists', 48);
         }
 
         $this->collections[$name] = [
@@ -124,6 +124,19 @@ class MockDatabase extends Database
             'ok' => 1.0
         ];
     }
+
+    /**
+     * Return empty cursor
+     *
+     * @param array|object $command Command document
+     * @param array        $options Options for command execution
+     * @return MockCursor
+     */
+    public function command($command, array $options = [])
+    {
+        return new MockCursor([]);
+    }
+
 
     /**
      * Return collection

@@ -16,6 +16,7 @@ use MongoDB\Model\IndexInfoIteratorIterator;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Operation\FindOneAndUpdate;
 use PHPUnit\Framework\Constraint\Constraint;
+use MongoDB\Driver\Exception\BulkWriteException;
 
 /**
  * A mocked MongoDB collection
@@ -100,7 +101,7 @@ class MockCollection extends Collection
             foreach ($this->documents as $doc) {
                 // if document with the same id already exists
                 if ($doc['_id'] == $document['_id']) {
-                    throw new DriverRuntimeException();
+                    throw new BulkWriteException('duplicate key error', 11000);
                 }
             }
         }
@@ -184,10 +185,12 @@ class MockCollection extends Collection
             if ($options['upsert'] && !$anyUpdates) {
                 if (array_key_exists('$set', $update)) {
                     $documents = [array_merge($filter, $update['$set'])];
+                } elseif (array_key_exists('$setOnInsert', $update)) {
+                    $documents = [$update['$setOnInsert']];
                 } else {
                     $documents = [$update];
                 }
-                $this->insertMany($documents, $options);
+                return $this->insertMany($documents, $options);
             }
         }
     }
@@ -196,7 +199,7 @@ class MockCollection extends Collection
     {
         // The update operators are required, as exemplified here:
         // http://mongodb.github.io/mongo-php-library/tutorial/crud/
-        $supported = ['$set', '$unset', '$inc', '$push'];
+        $supported = ['$set', '$unset', '$addToSet', '$inc', '$setOnInsert', '$push'];
         $unsupported = array_diff(array_keys($update), $supported);
         if (count($unsupported) > 0) {
             throw new Exception("Unsupported update operators found: " . implode(', ', $unsupported));
@@ -213,6 +216,22 @@ class MockCollection extends Collection
                     }
                     $tmp = $v;
                 }
+            } else {
+                $doc[$k] = $v;
+            }
+        }
+
+        foreach ($update['$addToSet'] ?? [] as $k => $v) {
+            if (array_key_exists($k, $doc)) {
+                $doc[$k][] = $v;
+            } else {
+                $doc[$k] = [$v];
+            }
+        }
+
+        foreach ($update['$inc'] ?? [] as $k => $v) {
+            if (array_key_exists($k, $doc)) {
+                $doc[$k] += $v;
             } else {
                 $doc[$k] = $v;
             }
@@ -256,6 +275,14 @@ class MockCollection extends Collection
         if (isset($options['sort'])) {
             usort($collectionCopy, function ($a, $b) use ($options): int {
                 foreach ($options['sort'] as $key => $dir) {
+                    if($key === '$natural') {
+                        if($dir === 0) {
+                            return -1;
+                        }
+
+                        continue;
+                    }
+
                     $av = $a[$key];
                     $bv = $b[$key];
 
@@ -344,6 +371,7 @@ class MockCollection extends Collection
         }
 
         $this->indices[$name] = new Index($key, $options);
+        return $name;
     }
 
     public function drop(array $options = [])
@@ -354,7 +382,163 @@ class MockCollection extends Collection
 
     public function aggregate(array $pipeline, array $options = [])
     {
-        // TODO: Implement this function
+        if (isset($options['typeMap'])) {
+            $typeMap = array_merge($this->typeMap, $options['typeMap']);
+        } else {
+            $typeMap = $this->typeMap;
+        }
+
+        $result = array_values($this->documents);
+        foreach($pipeline as $operation => $pipe) {
+            if(!is_array($pipe)) {
+                throw new Exception('aggregation pipe must be an array');
+            } elseif(count($pipe) !== 1) {
+                throw new Exception('aggregation pipe only supports one operation');
+            }
+
+            reset($pipe);
+            $operation = key($pipe);
+            $pipe = $pipe[$operation];
+
+            switch($operation) {
+                case '$match':
+                    $result = $this->aggregateMatch($result, $pipe);
+                break;
+                case '$lookup':
+                    $result = $this->aggregateLookup($result, $pipe);
+                break;
+                case '$unwind':
+                    $result = $this->aggregateUnwind($result, $pipe);
+                break;
+                case '$replaceRoot':
+                    $result = $this->aggregateReplaceRoot($result, $pipe);
+                break;
+                case '$project':
+                    $result = $this->aggregateProject($result, $pipe);
+                break;
+                case '$addFields':
+                    $result = $this->aggregateAddFields($result, $pipe);
+                break;
+                default:
+                    throw new Exception('aggregation '.$operation.' is not supported');
+            }
+        }
+
+        $cursor = [];
+        foreach($result as $doc) {
+            $cursor[] = $this->typeMap($doc, $typeMap);
+        }
+
+        return new MockCursor($cursor);
+    }
+
+    protected function aggregateUnwind($documents, $pipe)
+    {
+        if(!isset($pipe['path'])) {
+            throw new Exception('$unwind requires path');
+        }
+
+        $field = $pipe['path'];
+
+        if(substr($field, 0, 1) !== '$') {
+            throw new Exception('$unwind path requires field with $ prefix');
+        }
+
+        $field = substr($field, 1);
+
+        $result = [];
+        foreach($documents as $doc) {
+            $value = $this->getArrayValue($doc, $field);
+            if($value !== null) {
+                foreach($value as $sub) {
+                    $sub_doc = $doc->getArrayCopy();
+                    $sub_doc[$field] = $sub;
+                    $result[] = new BSONDocument($sub_doc);
+                }
+            } else {
+                $result[] = $doc;
+            }
+        }
+
+        return $result;
+    }
+
+    protected function aggregateProject($documents, $pipe)
+    {
+        return $documents;
+    }
+
+    protected function aggregateReplaceRoot($documents, $pipe)
+    {
+        if(!isset($pipe['newRoot'])) {
+            throw new Exception('$newRoot requires newRoot');
+        }
+
+        $field = $pipe['newRoot'];
+        if(substr($field, 0, 1) !== '$') {
+            throw new Exception('$newRoot newRoot requires field with $ prefix');
+        }
+
+        $field = substr($field, 1);
+        foreach($documents as &$doc) {
+            $sub = $this->getArrayValue($doc, $field);
+            $doc = new BSONDocument($sub);
+        }
+
+        return $documents;
+    }
+
+    protected function aggregateMatch($documents, $pipe)
+    {
+        $matcher = $this->matcherFromQuery($pipe);
+        $result = [];
+        foreach ($documents as $doc) {
+            if ($matcher($doc)) {
+                $result[] = $doc;
+            }
+        }
+
+        return $result;
+    }
+
+    protected function aggregateLookup($documents, $pipe)
+    {
+        if(!isset($pipe['from'])) {
+            throw new Exception('$lookup requires from');
+        }
+
+        if(!isset($pipe['localField'])) {
+            throw new Exception('$lookup requires localField');
+        }
+
+        if(!isset($pipe['foreignField'])) {
+            throw new Exception('$lookup requires foreignField');
+        }
+
+        if(!isset($pipe['as'])) {
+            throw new Exception('$lookup requires as');
+        }
+
+        $remote = $this->db->selectCollection($pipe['from']);
+
+        foreach($documents as &$doc) {
+            if(!isset($doc[$pipe['localField']])) {
+                $doc[$pipe['as']] = [];
+                continue;
+            }
+
+            $doc[$pipe['as']] = $remote->find(
+                [$pipe['foreignField'] => $doc[$pipe['localField']]]
+            )->toArray();
+        }
+
+
+        return $documents;
+    }
+
+    protected function aggregateAddFields($documents, $pipe)
+    {
+        return $documents;
     }
 
     public function bulkWrite(array $operations, array $options = [])
@@ -486,10 +670,10 @@ class MockCollection extends Collection
         // TODO: Implement this function
     }
 
-    private function buildRecursiveMatcherQuery(array $query): array
+    private function buildRecursiveMatcherQuery(?array $query): array
     {
         $matchers = [];
-        foreach ($query as $field => $value) {
+        foreach ((array)$query as $field => $value) {
             if ($field === '$and' || $field === '$or' || $field === '$nor' || is_numeric($field)) {
                 $matchers[$field] = $this->buildRecursiveMatcherQuery($value);
             } else {
@@ -499,7 +683,7 @@ class MockCollection extends Collection
         return $matchers;
     }
 
-    private function matcherFromQuery(array $query): callable
+    private function matcherFromQuery(?array $query): callable
     {
         $matchers = $this->buildRecursiveMatcherQuery($query);
         $orig_matchers = $matchers;

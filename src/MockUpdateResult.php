@@ -38,7 +38,7 @@ class MockUpdateResult extends UpdateResult
 
     public function getUpsertedId()
     {
-        return $this->upsertedIds;
+        return count($this->upsertedIds) > 0 ? $this->upsertedIds[0] : null;
     }
 
     public function isAcknowledged()
