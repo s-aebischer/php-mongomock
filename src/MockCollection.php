@@ -70,8 +70,12 @@ class MockCollection extends Collection
     /** @var array */
     private $options = [];
 
-    /** @var TypeMapper */
-    private $typeMapper;
+    /** @var array */
+    private $typeMap = [
+        'array' => BSONArray::class,
+        'document' => BSONDocument::class,
+        'root' => BSONDocument::class
+    ];
 
     /**
      * @param string $name
@@ -89,7 +93,9 @@ class MockCollection extends Collection
             $this->options = $options;
         }
 
-        $this->typeMapper = TypeMapper::createWithDefault($this->options['typeMap'] ?? []);
+        if (isset($this->options['typeMap'])) {
+            $this->typeMap = $this->options['typeMap'];
+        }
     }
 
     public function insertOne($document, array $options = [])
@@ -259,9 +265,10 @@ class MockCollection extends Collection
 
     public function find($filter = [], array $options = []): MockCursor
     {
-        $typeMapper = $this->typeMapper;
         if (isset($options['typeMap'])) {
-            $typeMapper = $typeMapper->mergeWith(new TypeMapper($options['typeMap']));
+            $typeMap = array_merge($this->typeMap, $options['typeMap']);
+        } else {
+            $typeMap = $this->typeMap;
         }
 
         // record query for future assertions
@@ -322,7 +329,7 @@ class MockCollection extends Collection
                     $limit--;
                 }
 
-                $cursor[] = $typeMapper->map($doc);
+                $cursor[] = $this->typeMap($doc, $typeMap);
             }
         }
 
@@ -336,6 +343,31 @@ class MockCollection extends Collection
             return $result;
         }
         return null;
+    }
+
+    private function typeMap(BSONDocument $doc, array $typeMap)
+    {
+        $doc = $this->typeMapArray($doc, $typeMap);
+
+        if ($typeMap['document'] === 'array') {
+            $doc = $doc->getArrayCopy();
+        } elseif ($typeMap['document'] !== BSONDocument::class) {
+            $doc = new $typeMap['document']($doc->getArrayCopy());
+        }
+
+        return $doc;
+    }
+
+    private function typeMapArray($doc, array $typeMap)
+    {
+        foreach ($doc as $key => &$value) {
+            if (is_array($value) && $typeMap['array'] !== 'array') {
+                $value = $this->typeMapArray($value, $typeMap);
+                $value = new $typeMap['array']($value);
+            }
+        }
+
+        return $doc;
     }
 
     public function count($filter = [], array $options = [])
@@ -403,22 +435,22 @@ class MockCollection extends Collection
             switch($operation) {
                 case '$match':
                     $result = $this->aggregateMatch($result, $pipe);
-                break;
+                    break;
                 case '$lookup':
                     $result = $this->aggregateLookup($result, $pipe);
-                break;
+                    break;
                 case '$unwind':
                     $result = $this->aggregateUnwind($result, $pipe);
-                break;
+                    break;
                 case '$replaceRoot':
                     $result = $this->aggregateReplaceRoot($result, $pipe);
-                break;
+                    break;
                 case '$project':
                     $result = $this->aggregateProject($result, $pipe);
-                break;
+                    break;
                 case '$addFields':
                     $result = $this->aggregateAddFields($result, $pipe);
-                break;
+                    break;
                 default:
                     throw new Exception('aggregation '.$operation.' is not supported');
             }
@@ -649,11 +681,11 @@ class MockCollection extends Collection
 
         foreach ($this->indices as $name => $index) {
             $indices[] = [
-                'v' => 1,
+                'v'      => 1,
                 'unique' => isset($index->getOptions()['unique']) ? $index->getOptions()['unique'] : false,
-                'key' => $index->getKey(),
-                'name' => $name,
-                'ns' => $dbName . '.' . $this->name,
+                'key'    => $index->getKey(),
+                'name'   => $name,
+                'ns'     => $dbName . '.' . $this->name,
             ];
         }
 
