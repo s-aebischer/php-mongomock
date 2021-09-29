@@ -5,7 +5,6 @@ namespace Helmich\MongoMock;
 use ArrayIterator;
 use MongoDB\Collection;
 use MongoDB\Database;
-use MongoDB\Driver\Manager;
 use MongoDB\Driver\Exception\RuntimeException;
 use MongoDB\Model\CollectionInfoCommandIterator;
 
@@ -25,15 +24,6 @@ use MongoDB\Model\CollectionInfoCommandIterator;
 class MockDatabase extends Database
 {
     /** @var string */
-    public $uri = 'mongodb://127.0.0.1:27017';
-
-    /** @var array */
-    public $uriOptions = [];
-
-    /** @var array */
-    public $driverOptions = [];
-
-    /** @var string */
     private $name;
 
     /** @var Collection * */
@@ -47,10 +37,8 @@ class MockDatabase extends Database
      */
     public function __construct(string $name = 'database', array $options = [])
     {
-        $manager = new Manager($this->uri, $this->uriOptions, $this->driverOptions);
         $this->name = $name;
         $this->options = $options;
-        parent::__construct($manager, $name, []);
     }
 
     /**

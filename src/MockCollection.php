@@ -10,10 +10,10 @@ use MongoDB\BSON\Binary;
 use MongoDB\BSON\ObjectID;
 use MongoDB\BSON\Regex;
 use MongoDB\Collection;
-use MongoDB\Driver\Manager;
 use MongoDB\Model\BSONArray;
 use MongoDB\Model\BSONDocument;
 use MongoDB\Model\IndexInfoIteratorIterator;
+use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
 use MongoDB\Operation\FindOneAndUpdate;
 use PHPUnit\Framework\Constraint\Constraint;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -62,18 +62,6 @@ class MockCollection extends Collection
     public $dropped = false;
 
     /** @var string */
-    public $uri = 'mongodb://127.0.0.1:27017';
-
-    /** @var array */
-    public $uriOptions = [];
-
-    /** @var array */
-    public $driverOptions = [];
-
-    /** @var string */
-    public $database = 'database';
-
-    /** @var string */
     private $name;
 
     /** @var MockDatabase|null */
@@ -95,11 +83,9 @@ class MockCollection extends Collection
      */
     public function __construct(string $name = 'collection', MockDatabase $db = null, array $options = [])
     {
-        $manager = new Manager($this->uri, $this->uriOptions, $this->driverOptions);
         $this->name = $name;
         $this->db = $db;
         $this->options = $options;
-        parent::__construct($manager, $this->database, $name);
 
         if ($db !== null) {
             $this->options = array_merge($db->getOptions(), $options);
