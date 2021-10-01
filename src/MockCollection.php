@@ -702,6 +702,11 @@ class MockCollection extends Collection
         // TODO: Implement this function
     }
 
+    public function watch(array $pipeline = [], array $options = [])
+    {
+        // TODO: Implement this function
+    }
+
     private function buildRecursiveMatcherQuery(?array $query): array
     {
         $matchers = [];
