@@ -704,7 +704,53 @@ class MockCollection extends Collection
 
     public function watch(array $pipeline = [], array $options = [])
     {
-        // TODO: Implement this function
+        // Set default options
+        $fullDocument = 'default';
+
+        foreach ($options as $option => $val) {
+            switch ($option) {
+                case 'batchSize':
+                case 'collation':
+                case 'maxAwaitTimeMS':
+                case 'readConcern':
+                case 'readPreference':
+                case 'resumeAfter':
+                case 'session':
+                case 'startAtOperationTime':
+                case 'typeMap':
+                    // TODO: Implement these options
+                    break;
+
+                case 'fullDocument':
+                    if ($val === 'updateLookup') {
+                        $fullDocument = $val;
+                    }
+                    break;
+            }
+        }
+
+        $result = [
+            '_id' => new BSONDocument(['_data' => strtoupper(bin2hex(random_bytes(56)))]),
+            'operationType' => 'update',
+            'clusterTime' => new BSON\Timestamp(1, time()),
+            'ns' => new BSONDocument(['db' => $this->db->getDatabaseName(), 'coll' => $this->getCollectionName()]),
+            'documentKey' => new BSONDocument(['_id' => new ObjectId()]),
+            'updateDescription' => new BSONDocument(['updatedFields' => new BSONDocument(['foo' => 'bar']), 'removedFields' => new BSONArray([])]),
+        ];
+
+        if ($fullDocument === 'updateLookup') {
+            if ($pipeline !== []) {
+                $typeMap = [
+                    'document' => 'array',
+                ];
+
+                $result['fullDocument'] = new BSONDocument($this->aggregate($pipeline, ['typeMap' => $typeMap])->toArray()[0]);
+            } else {
+                $result['fullDocument'] = new BSONDocument($this->documents[0]);
+            }
+        }
+
+        return new MockCursor([new BSONDocument($result)]);
     }
 
     private function buildRecursiveMatcherQuery(?array $query): array
