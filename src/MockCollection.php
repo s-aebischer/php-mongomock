@@ -744,7 +744,13 @@ class MockCollection extends Collection
                     'document' => 'array',
                 ];
 
-                $result['fullDocument'] = new BSONDocument($this->aggregate($pipeline, ['typeMap' => $typeMap])->toArray()[0]);
+                $document = $this->aggregate($pipeline, ['typeMap' => $typeMap])->toArray();
+
+                if ($document === []) {
+                    throw new Exception('Job not found with given filter: ' . json_encode($pipeline[0]));
+                }
+
+                $result['fullDocument'] = new BSONDocument($document[0]);
             } else {
                 $result['fullDocument'] = new BSONDocument($this->documents[0]);
             }
