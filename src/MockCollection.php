@@ -744,6 +744,7 @@ class MockCollection extends Collection
                     'document' => 'array',
                 ];
 
+                $pipeline = $this->removeStringFromPipeline($pipeline, 'fullDocument.');
                 $document = $this->aggregate($pipeline, ['typeMap' => $typeMap])->toArray();
 
                 if ($document === []) {
@@ -988,5 +989,25 @@ class MockCollection extends Collection
         } else {
             return isset(self::TYPE[$type]) && gettype($value) === self::TYPE[$type];
         }
+    }
+
+    protected function removeStringFromPipeline(array $pipeline, string $string): array
+    {
+        foreach ($pipeline as $key => $val) {
+
+            if (strpos($key, $string) !== false) {
+                unset($pipeline[$key]);
+                $key = str_replace($string, '', $key);
+                $pipeline[$key] = $val;
+            }
+
+            if (is_array($val)) {
+                $pipeline[$key] = $this->removeStringFromPipeline($val, $string);
+            } else if (strpos($val, $string) !== false) {
+                $pipeline[$key] = str_replace($string, '', $val);
+            }
+        }
+
+        return $pipeline;
     }
 }
