@@ -10,10 +10,10 @@ use MongoDB\BSON\Binary;
 use MongoDB\BSON\ObjectID;
 use MongoDB\BSON\Regex;
 use MongoDB\Collection;
-use MongoDB\Model\BSONArray;
-use MongoDB\Model\BSONDocument;
-use MongoDB\Model\IndexInfoIteratorIterator;
 use MongoDB\Driver\Exception\RuntimeException as DriverRuntimeException;
+use MongoDB\Model\BSONDocument;
+use MongoDB\Model\BSONArray;
+use MongoDB\Model\IndexInfoIteratorIterator;
 use MongoDB\Operation\FindOneAndUpdate;
 use PHPUnit\Framework\Constraint\Constraint;
 use MongoDB\Driver\Exception\BulkWriteException;
@@ -260,7 +260,6 @@ class MockCollection extends Collection
                 $doc[$k][] = $v;
             }
         }
-
     }
 
     public function find($filter = [], array $options = []): MockCursor
@@ -590,13 +589,18 @@ class MockCollection extends Collection
     public function deleteOne($filter, array $options = [])
     {
         $matcher = $this->matcherFromQuery($filter);
+        $count = 0;
+        $deletedIds = [];
         foreach ($this->documents as $i => $doc) {
             if ($matcher($doc)) {
+                $deletedIds[] = $doc['_id'];
                 unset($this->documents[$i]);
                 $this->documents = array_values($this->documents);
-                return;
+                $count++;
+                break;
             }
         }
+        return new MockDeleteResult($count, $count, $deletedIds);
     }
 
     public function distinct($fieldName, $filter = [], array $options = [])
@@ -604,7 +608,7 @@ class MockCollection extends Collection
         $values = [];
 
         $matcher = $this->matcherFromQuery($filter);
-        foreach ($this->documents as $document){
+        foreach ($this->documents as $document) {
             if ($matcher($document) && isset($document[$fieldName])) {
                 $values[] = $document[$fieldName];
             }
@@ -883,8 +887,18 @@ class MockCollection extends Collection
 
         if (is_array($constraint)) {
             return $match = function ($val) use (&$constraint, &$match): bool {
+                //cast $val to array if it is an instance of BSONArray
+                //this will prevent is_array,array_reduce... from failing
+                if ($val instanceof BSONArray) {
+                    $val = (array)$val;
+                }
                 $result = true;
                 foreach ($constraint as $type => $operand) {
+                    //cast $operand to array if it is an instance of BSONArray
+                    //this will prevent is_array,array_reduce... from failing
+                    if ($operand instanceof BSONArray) {
+                        $operand = (array)$operand;
+                    }
                     switch ($type) {
                         // Mongo operators (subset)
                         case '$gt':
@@ -906,12 +920,26 @@ class MockCollection extends Collection
                             $result = ($val != $operand);
                             break;
                         case '$in':
+                            $matchInArray = function ($val, $operand) {
+                                return array_reduce($operand, function ($ac, $op) use ($val) {
+                                    if ($op instanceof \MongoDB\BSON\Regex) {
+                                        $regex = "/" . $op->getPattern() . "/" . $op->getFlags();
+                                        return ($ac || preg_match($regex, $val) === 1);
+                                    } else if (is_string($op)) {
+                                        if (@preg_match($op, '') === false) {
+                                            return ($ac || $op == $val);
+                                        }
+                                        return ($ac || preg_match($op, $val) === 1);
+                                    }
+                                    return ($ac || $op == $val);
+                                }, false);
+                            };
                             $result = (!is_array($val))
-                                ? in_array($val, $operand)
+                                ? $matchInArray($val, $operand)
                                 : array_reduce(
-                                    $operand,
-                                    function ($acc, $op) use ($val) {
-                                        return ($acc || in_array($op, $val));
+                                    $val,
+                                    function ($acc, $fval) use ($operand, $matchInArray) {
+                                        return ($acc || $matchInArray($fval, $operand));
                                     },
                                     false
                                 );
@@ -931,7 +959,8 @@ class MockCollection extends Collection
                             }
                             break;
                         case '$exists':
-                            $result = $val !== null;
+                            // note that for inexistant fields, val is overridden to be null
+                            return $operand ? $val !== null : $val === null;
                             break;
                         case '$size':
                             $result = count($val) === $operand;
@@ -947,7 +976,37 @@ class MockCollection extends Collection
                                 $result = !$operand;
                             }
                             break;
-                        // Custom operators
+                        case '$regex':
+                            if ($operand instanceof Regex) {
+                                $regex = "/" . $operand->getPattern() . "/" . $operand->getFlags();
+                                $result = preg_match($regex, $val) === 1;
+                            } else if (is_string($operand)) {
+                                if (@preg_match($operand, '') === false) {
+                                    throw new Exception("Invalid constraint for operator '" . $type . "'");
+                                }
+                                $result = preg_match($operand, $val) === 1;
+                            } else {
+                                throw new Exception("Invalid constraint for operator '" . $type . "'");
+                            }
+                            break;
+                        case '$all':
+                            $result = false;
+                            if (is_array($val)) {
+                                if (count($operand) == 1 && is_array($operand[0])) {
+                                    $result = count($val) == count($operand[0]) && array_reduce(
+                                        $operand[0],
+                                        function ($acc, $op) use ($val) {
+                                            return $acc && in_array($op, $val, true);
+                                        },
+                                        true
+                                    );
+                                }
+                                $result = $result || array_reduce($operand, function ($acc, $op) use ($val) {
+                                    return $acc && in_array($op, $val, true);
+                                }, true);
+                            }
+                            break;
+                            // Custom operators
                         case '$instanceOf':
                             $result = is_a($val, $operand);
                             break;

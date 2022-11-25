@@ -4,6 +4,7 @@ namespace Helmich\MongoMock\Tests;
 
 use Helmich\MongoMock\MockCollection;
 use Helmich\MongoMock\MockCursor;
+use Helmich\MongoMock\Exception;
 use MongoDB\BSON\ObjectID;
 use MongoDB\BSON\Regex;
 use MongoDB\Collection;
@@ -184,6 +185,9 @@ class MockCollectionTest extends TestCase
         $result = $find->toArray();
         self::assertThat(count($result), self::equalTo(1));
         self::assertThat($result[0]['foo'], self::equalTo('bar'));
+
+        $result = $this->col->count(['foo' => ['$not' => ['$regex' => "/bar/"]]]);
+        self::assertThat($result, self::equalTo(1));
     }
 
     /**
@@ -213,6 +217,114 @@ class MockCollectionTest extends TestCase
     /**
      * @depends testInsertOneInsertsDocument
      */
+    public function testFindWithAllFilter()
+    {
+        $this->col->insertMany([
+            ['foo' => ['bar', 'baz', 'bad']],
+            ['foo' => ['baz', 'bad']],
+            ['foo' => ['foobar', 'baroof']],
+            ['foo' => [1,2,3], 'bar' => [4,5,6]],
+            ['foo' => [99.99,'bar',10], 'bar' => [false,true]],
+        ]);
+
+        $result = $this->col->count(['foo' => ['$all' => ['bar','baz','foobar','zar']]]);
+        self::assertThat($result, self::equalTo(0));
+
+        $result = $this->col->count(['foo' => ['$all' => ['bar','baz','bad']]]);
+        self::assertThat($result, self::equalTo(1));
+
+        $result = $this->col->count(['foo' => ['$all' => ['foobar', 'baroof']]]);
+        self::assertThat($result, self::equalTo(1));
+        //The $all is equivalent to an $and operation of the specified values;
+        $andResult = $this->col->count(['$and' => [['foo'=>'foobar'],['foo' => 'baroof']]]);
+        self::assertThat($andResult, self::equalTo($result));
+
+        $result = $this->col->count(['foo' => ['$all' => ['baz']]]);
+        self::assertThat($result, self::equalTo(2));
+
+        $result = $this->col->count(['foo' => ['$all' => [3,1,2]], 'bar' => ['$all' => [6,4]] ]);
+        self::assertThat($result, self::equalTo(1));
+
+        $result = $this->col->count(['foo' => ['$all' => [10,99.99000]], 'bar' => ['$all' => [true]] ]);
+        self::assertThat($result, self::equalTo(1));
+
+        $result = $this->col->count(['foo' => ['$all' => [99.99000,'baz']], 'bar' => ['$all' => ['']] ]);
+        self::assertThat($result, self::equalTo(0));
+    }
+
+    /**
+     * @depends testInsertOneInsertsDocument
+     */
+    public function testFindWithAllFilterNestedArrays()
+    {
+        /**
+         * When passed an array of a nested array (e.g. [ [ "A" ] ] ), 
+         * $all matches documents where the field contains the nested 
+         * array as an element (e.g. field: [ [ "A" ], ... ]),
+         * or the field equals the nested array (e.g. field: [ "A" ]).
+        */
+        $this->col->insertMany([
+            ['foo' => ['bar', 'baz', ['bad']]],
+            ['foo' => ['bad']],
+            ['foo' => ['foobar', 'baroof']],
+            ['foo' => [1,2,3], 'bar' => [4,5,6]],
+            ['foo' => [99.99,'bar',10], 'bar' => [false,true]],
+            ['foo' => [], 'bar' => []],
+        ]);
+
+        $result = $this->col->count(['foo' => ['$all' => ['bar','baz',['bad']]]]);
+        self::assertThat($result, self::equalTo(1));
+
+        $result = $this->col->count(['foo' => ['$all' => [['bad']] ]]);
+        self::assertThat($result, self::equalTo(2));
+
+        $result = $this->col->count(['foo' => ['$all' => [['foobar', 'baroof']] ]]);
+        self::assertThat($result, self::equalTo(1));
+
+        $result = $this->col->count(['foo' => ['$all' => [['foobar', 'baroof'],'bar'] ]]);
+        self::assertThat($result, self::equalTo(0));
+
+        $result = $this->col->count(['foo' => ['$all' => []],'bar' => ['$all'=>[[]]]]);
+        self::assertThat($result, self::equalTo(1));
+    }
+
+    public function testFindWithInAndRegexFilter()
+    {
+        $this->col->insertMany([
+            ['foo' => ['bar', 'baz', 'bad']],
+            ['foo' => ['baz', 'bad']],
+            ['foo' => ['foobar', 'baroof']],
+            ['foo' => 'BazBarBaz'],
+            ['foo' => 'boof'],
+        ]);
+
+        /**
+         * To include a regular expression in an $in query expression,
+         * you can only use JavaScript regular expression objects (i.e. /pattern/ ).
+         * source: https://www.mongodb.com/docs/manual/reference/operator/query/regex/#-in-expressions
+         */
+        $result = $this->col->count(['foo' => ['$in' => ["/barBar/", "/barBor/"]]]);
+        self::assertThat($result, self::equalTo(0));
+
+        $result = $this->col->count(['foo' => ['$in' => ["/bar$/", "/^Bar/i",]]]);
+        self::assertThat($result, self::equalTo(2));
+
+        $result = $this->col->count(['foo' => ['$in' => ['/^Bar$/i',]]]);
+        self::assertThat($result, self::equalTo(1));
+
+        $result = $this->col->count(['foo' => ['$in' => ['/OO(B|f)/i',]]]);
+        self::assertThat($result, self::equalTo(2));
+
+        $result = $this->col->count(['foo' => ['$in' => [new \MongoDB\BSON\Regex("FOOBAR|bad", "i")]]]);
+        self::assertThat($result, self::equalTo(3));
+
+        $result = $this->col->count(['foo' => ['$in' => [new \MongoDB\BSON\Regex("ob"), new \MongoDB\BSON\Regex("oof")]]]);
+        self::assertThat($result, self::equalTo(2));
+    }
+
+    /**
+     * @depends testInsertOneInsertsDocument
+     */
     public function testInsertOneKeepsBSONObjects()
     {
         $result = $this->col->insertOne(new BSONDocument(['foo' => 'bar']));
@@ -235,6 +347,32 @@ class MockCollectionTest extends TestCase
         $find = $this->col->findOne(['_id' => $id]);
         self::assertThat($find, self::isInstanceOf(BSONDocument::class));
         self::assertThat($find['foo'], self::equalTo('bar'));
+    }
+
+    public function testFindWithRegexFilter()
+    {
+        $this->col->insertMany([
+            ['foo' => 'barbazbad'],
+            ['foo' => 'bazbad'],
+            ['foo' => 'foobarbaroof']
+        ]);
+
+        $result = $this->col->count(['foo' => ['$regex' => "/barBar/"]]);
+        self::assertThat($result, self::equalTo(0));
+
+        $result = $this->col->count(['foo' => ['$regex' => "/bar/"]]);
+        self::assertThat($result, self::equalTo(2));
+
+        $result = $this->col->count(['foo' => ['$regex' => "/(bar|BAZ)/i"]]);
+        self::assertThat($result, self::equalTo(3));
+
+        $result = $this->col->count(['foo' => ['$regex' => new \MongoDB\BSON\Regex("FOOBAR", "i")]]);
+        self::assertThat($result, self::equalTo(1));
+
+        $this->expectException(Exception::class);
+
+        $result = $this->col->count(['foo' => ['$regex' => "[[[[foobar{"]]);
+
     }
 
     public function testInsertManyInsertsDocuments()
@@ -281,10 +419,15 @@ class MockCollectionTest extends TestCase
             ['foo' => 'bar', 'bar' => 1],
             ['foo' => 'baz', 'bar' => 2],
         ]);
-        $this->col->deleteOne(['bar' => 1]);
+
+        $deleteResult = $this->col->deleteOne(['bar' => 1]);
 
         self::assertThat($this->col->count(['bar' => 1]), self::equalTo(1));
         self::assertThat($this->col->count(['bar' => 2]), self::equalTo(1));
+
+        self::assertInstanceOf(\Helmich\MongoMock\MockDeleteResult::class, $deleteResult);
+
+        self::assertEquals(1, $deleteResult->getDeletedCount());
     }
 
     /**
@@ -694,6 +837,37 @@ class MockCollectionTest extends TestCase
         $result = iterator_to_array($result);
         self::assertThat(count($result), self::equalTo(0));
     }
+
+    /**
+     * @depends testInsertManyInsertsDocuments
+     */
+    public function testFindWorksWithExistsParameterized()
+    {
+        $this->col->insertMany([
+            ['foo' => 'foo', 'bar' => 3, 'krypton' => true],
+            ['foo' => 'bar', 'bar' => 1],
+            ['foo' => 'baz', 'bar' => 2],
+        ]);
+        $result = $this->col->find([
+            'foobar' => ['$exists' => false],
+        ]);
+        $result = iterator_to_array($result);
+        self::assertThat(count($result), self::equalTo(3));
+
+        $result = $this->col->find([
+            'krypton' => ['$exists' => true],
+        ]);
+        $result = iterator_to_array($result);
+        self::assertThat(count($result), self::equalTo(1));
+        self::assertThat($result[0]['foo'], self::equalTo('foo'));
+
+        $result = $this->col->find([
+            'inexistant' => ['$exists' => true],
+        ]);
+        $result = iterator_to_array($result);
+        self::assertThat(count($result), self::equalTo(0));
+    }
+
 
     /**
      * @depends testInsertManyInsertsDocuments
