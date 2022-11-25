@@ -757,7 +757,9 @@ class MockCollection extends Collection
 
                 $result['fullDocument'] = new BSONDocument($document[0]);
             } else {
-                $result['fullDocument'] = new BSONDocument($this->documents[0]);
+                $result['fullDocument'] = isset($this->documents[0])
+                    ? new BSONDocument($this->documents[0])
+                    : new BSONDocument([]);
             }
         }
 
